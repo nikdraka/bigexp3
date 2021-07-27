@@ -1,0 +1,16 @@
+library(tsutils)
+library(forecast)
+library(smooth) # the latest smooth 3.1.3.41006
+library(MASS)
+library(nloptr)
+library(xtable)
+library(greybox)
+library(clusterGeneration)
+library(parallel)
+library(RColorBrewer)
+library(devtools)
+
+# devtools::install_github('config-i1/smooth')
+# 
+# install.packages(c('Rcpp', 'RcppArmadillo'))
+# Rcpp::sourceCpp('/Users/pritular/Documents/R-Git/bigexp1/helloworld.cpp')
