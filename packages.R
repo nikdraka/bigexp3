@@ -9,7 +9,7 @@ library(clusterGeneration)
 library(parallel)
 library(RColorBrewer)
 library(devtools)
-
+library(snow)
 # devtools::install_github('config-i1/smooth')
 # 
 # install.packages(c('Rcpp', 'RcppArmadillo'))

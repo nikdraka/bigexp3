@@ -1,17 +1,12 @@
-## Running all experiments for L1 regularisation, both unweighted and weighted
+## Running all experiments for L2 regularisation, both unweighted and weighted
 
 ## Packages to run
-library(tsutils)
-library(forecast)
-library(smooth) # the latest smooth 3.1.3.41006
-library(MASS)
 library(nloptr)
-library(xtable)
-library(greybox)
-library(clusterGeneration)
 library(parallel)
-library(RColorBrewer)
-library(devtools)
+library(snow)
+library(clusterGeneration)
+library(rlecuyer)
+library(smooth)
 
 ## Function to run
 # generate time series
@@ -21,50 +16,50 @@ genseries <- function(dgp = c("ANN", "AAN", "AAdN","ANA", "AAA"), n = 100, freq 
   n <- n[1]
   freq <- freq
   
-  burnin <- 200
+  burnin <- 0
   
   # 1. Generating the time series, season initial values are generated randomly
   if (dgp == "ANN") {
     input.persist <- 0.4
-    input.initial <- c(100)
+    input.initial <- c(200)
     y <- sim.es(model = dgp, obs = burnin+n, nsim = 1, frequency = freq,
                 bounds = "usual", persistence = input.persist,
                 initial = input.initial)$data[(burnin+1):(burnin+n)]
   } else if (dgp == "AAN") {
     input.persist <- c(0.4, 0.3)
-    input.initial <- c(100, 0.5)
+    input.initial <- c(200, 0.5)
     y <- sim.es(model = dgp, obs = burnin+n, nsim = 1, frequency = freq,
                 bounds = "usual", persistence = input.persist,
                 initial = input.initial)$data[(burnin+1):(burnin+n)]
   } else if (dgp == "ANA") {
-    input.persist <- c(0.4, 0.2)
-    input.initial <- c(100)
+    input.persist <- c(0.4, 0.1)
+    input.initial <- c(200)
     y <- sim.es(model = dgp, obs = burnin+n, nsim = 1, frequency = freq,
                 bounds = "usual", persistence = input.persist,
                 initial = input.initial)$data[(burnin+1):(burnin+n)]
   } else if (dgp == "AAA") {
-    input.persist <- c(0.4, 0.3, 0.2)
-    input.initial <- c(100, 0.5)
+    input.persist <- c(0.4, 0.3, 0.1)
+    input.initial <- c(200, 0.5)
     y <- sim.es(model = dgp, obs = burnin+n, nsim = 1, frequency = freq,
                 bounds = "usual", persistence = input.persist,
                 initial = input.initial)$data[(burnin+1):(burnin+n)]
   } else if (is.null(dgp)) {
     input.persist <- 0.4
-    input.initial <- c(100)
+    input.initial <- c(200)
     y <- sim.es(model = dgp, obs = burnin+n, nsim = 1, frequency = freq,
                 bounds = "usual", persistence = input.persist,
                 initial = input.initial)$data[(burnin+1):(burnin+n)]
   } else if (dgp == "AAdN") {
     input.persist <- c(0.4, 0.3)
-    input.initial <- c(100, 0.5)
+    input.initial <- c(200, 0.5)
     y <- sim.es(model = dgp, obs = burnin+n, nsim = 1, frequency = freq,
-                bounds = "usual", persistence = input.persist, phi = 0.9,
+                bounds = "usual", persistence = input.persist, phi = 0.94,
                 initial = input.initial)$data[(burnin+1):(burnin+n)]
   } else if (dgp == "AAdA") {
-    input.persist <- c(0.4, 0.3, 0.2)
+    input.persist <- c(0.4, 0.3, 0.1)
     input.initial <- c(100, 0.5)
     y <- sim.es(model = dgp, obs = burnin+n, nsim = 1, frequency = freq,
-                bounds = "usual", persistence = input.persist, phi = 0.9,
+                bounds = "usual", persistence = input.persist, phi = 0.94,
                 initial = input.initial)$data[(burnin+1):(burnin+n)]
   } else if (dgp == "MAM") {
     input.persist <- c(0.3, 0.2, 0.1)
@@ -354,7 +349,7 @@ simulStudy <- function(data = y, model = NULL,
       w <- c(w1, w2, w3, w4)
       
     }
-  } else if (!weighted) {
+  } else {
     
     lambda <<- tuning[1]
     w <<- NULL
@@ -392,7 +387,7 @@ simulStudy <- function(data = y, model = NULL,
       if (weighted) {
         mdl <<- model
         fit.reg <- adam(yTrain, model = mdl, lags = freq, loss = loss.reg)
-      } else if (!weighted) {
+      } else {
         mdl <<- model
         fit.reg <- adam(yTrain, model = mdl, lags = freq, loss = loss.reg.ur)
       }
@@ -418,7 +413,7 @@ simulStudy <- function(data = y, model = NULL,
       if (weighted) {
         mdl <<- model
         fit.reg <- adam(yTrain, model = mdl, lags = freq, loss = loss.reg)
-      } else if (!weighted) {
+      } else {
         mdl <<- model
         fit.reg <- adam(yTrain, model = mdl, lags = freq, loss = loss.reg.ur)
       }
@@ -506,7 +501,7 @@ optimal.tuning <- function(x0 = x0, data = y, model = NULL,
                                             origin = origin, h = h, year.insample = y.i,
                                             type.loss = type.loss, optimise = TRUE, weighted = TRUE), 
                  lb = lb, ub = ub, opts = opts)
-  } else if (!weighted) {
+  } else {
     x1 <- nloptr(x0, function(x) simulStudy(tuning = x, data = y, model = mdl,
                                             origin = origin, h = h, year.insample = y.i,
                                             type.loss = type.loss, optimise = TRUE, weighted = FALSE), 
@@ -573,9 +568,13 @@ final.compile <- function(dgp = dgp, nobs = c(28, 420), freq = freq, model = mod
   weighted <- weighted
   
   ## Small sample size
-  y1 <-  ts(genseries(dgp = dgp, n = nobs1, freq = freq), frequency = freq)
-  while (min(y1) < 0) {
-    y1 <- ts(genseries(dgp = dgp, n = nobs1, freq = freq), frequency = freq)
+  if (dgp == "MAM" || mdl == "MAM") {
+    y1 <-  ts(genseries(dgp = dgp, n = nobs1, freq = freq), frequency = freq)
+    while (sum((y1 > 0)) < length(y1)) {
+      y1 <- ts(genseries(dgp = dgp, n = nobs1, freq = freq), frequency = freq)
+    }
+  } else {
+    y1 <-  ts(genseries(dgp = dgp, n = nobs1, freq = freq), frequency = freq)
   }
   
   model1 <- compile.ets(data = y1, model = mdl, origin = origin, h = h,
@@ -583,10 +582,15 @@ final.compile <- function(dgp = dgp, nobs = c(28, 420), freq = freq, model = mod
                         weighted = weighted, year.insample = 2)
   
   ## Large sample size
-  y2 <-  ts(genseries(dgp = dgp, n = nobs2, freq = freq), frequency = freq)
-  while (min(y2) < 0) {
-    y2 <- ts(genseries(dgp = dgp, n = nobs2, freq = freq), frequency = freq)
+  if (dgp == "MAM" || mdl == "MAM") {
+    y2 <-  ts(genseries(dgp = dgp, n = nobs2, freq = freq), frequency = freq)
+    while (sum((y2 > 0)) < length(y2)) {
+      y2 <- ts(genseries(dgp = dgp, n = nobs2, freq = freq), frequency = freq)
+    }
+  } else {
+    y2 <-  ts(genseries(dgp = dgp, n = nobs2, freq = freq), frequency = freq)
   }
+  
   
   model2 <- compile.ets(data = y2, model = mdl, origin = origin, h = h,
                         type.loss = type.loss, tuning = tuning, 
@@ -610,9 +614,9 @@ accuracy.etsreg <- function(error = error, horizon = horizon, scaled = FALSE) {
   
   for (i in 2:h) {
     
-    acc[1,1] <- sqrt(mean((error[,1])^2))
+    acc[1,1] <- mean(sqrt((error[,1])^2))
     acc[2,1] <- mean(abs(error[,1]))
-    acc[3,1] <- median(abs(error[,1]))
+    acc[3,1] <- mean(abs(error[,1]))
     acc[4,1] <- mean(error[,1])
     
     acc[1, i] <- mean(apply(error[,1:i], 1, function(x) sqrt(mean(x^2))))
@@ -651,8 +655,7 @@ predinterval.etsreg <- function(test = NULL, forecast = NULL, origin = origin,
                           fcst[[i]]$lower[1:j,col.level], 
                           fcst[[i]]$upper[1:j,col.level], level)
       
-      mat.pinball[i,j] <- pinball(test[i,1:j], fcst[[i]]$lower[1:j,col.level], (1-level)/2, loss = 1) +
-        pinball(test[i,1:j], fcst[[i]]$upper[1:j,col.level], level+(1-level)/2, loss = 1)
+      mat.pinball[i,j] <- pinball(test[i,1:j], fcst[[i]]$upper[1:j,col.level], level+(1-level)/2, loss = 1)
       
       mat.coverage[i,j] <- mean(test[i,j] > fcst[[i]]$lower[1:j,col.level] & test[i,j] < fcst[[i]]$upper[1:j,col.level])
       
@@ -673,16 +676,15 @@ predinterval.etsreg <- function(test = NULL, forecast = NULL, origin = origin,
 
 # Running the parallel ----------------------------------------------------
 
-set.seed(020193)
-
 crs <- detectCores()
-cl <- makeForkCluster(getOption("cl.cores", crs-1))
-writeLines(paste("Running with", crs-1, 'cores'))
+cl <- makeCluster(getOption("cl.cores", crs))
+writeLines(paste("Running with", crs, 'cores'))
 # Load packages to cluster
 invisible(clusterCall(cl, function(pkgs) {
   library(clusterGeneration)
   library(smooth)
   library(nloptr)
+  library(snow)
 }))
 
 invisible(clusterExport(cl, "genseries"))
@@ -696,11 +698,12 @@ invisible(clusterExport(cl, "final.compile"))
 invisible(clusterExport(cl, "accuracy.etsreg"))
 invisible(clusterExport(cl, "predinterval.etsreg"))
 
-runs <- 5
+clusterSetupRNG(cl, seed = 020193)
+
+runs <- 500
 
 ## DGP: ANN
 # Without weights
-start.timeUR <- Sys.time()
 system.time({dgpANN_modelANN_l1_UR <- clusterApplyLB(cl, 1:runs, function(x) final.compile(dgp = "ANN", nobs = c(28, 420), freq = 7, model = "ANN", 
                                                                                            h = 7, origin = 5, type.loss = "l1", 
                                                                                            tuning = c(0.1), weighted = FALSE))})
@@ -745,28 +748,9 @@ system.time({dgpANN_modelAAdN_l1_WR <- clusterApplyLB(cl, 1:runs, function(x) fi
 system.time({dgpANN_modelMAM_l1_WR <- clusterApplyLB(cl, 1:runs, function(x) final.compile(dgp = "ANN", nobs = c(28, 420), freq = 7, model = "MAM", 
                                                                                            h = 7, origin = 5, type.loss = "l1", 
                                                                                            tuning = c(0.1, 0.33, 0.33, 0.33), weighted = TRUE))})
-end.timeWR <- Sys.time()
-computetime1 <- end.timeWR - start.timeUR
-
-save(dgpANN_modelANN_l1_UR, file = "dgpANN_modelANN_l1_UR.Rdata")
-save(dgpANN_modelAAN_l1_UR, file = "dgpANN_modelAAN_l1_UR.Rdata")
-save(dgpANN_modelANA_l1_UR, file = "dgpANN_modelANA_l1_UR.Rdata")
-save(dgpANN_modelAAA_l1_UR, file = "dgpANN_modelAAA_l1_UR.Rdata")
-save(dgpANN_modelAAdA_l1_UR, file = "dgpANN_modelAAdA_l1_UR.Rdata")
-save(dgpANN_modelAAdN_l1_UR, file = "dgpANN_modelAAdN_l1_UR.Rdata")
-save(dgpANN_modelMAM_l1_UR, file = "dgpANN_modelMAM_l1_UR.Rdata")
-
-save(dgpANN_modelANN_l1_WR, file = "dgpANN_modelANN_l1_WR.Rdata")
-save(dgpANN_modelAAN_l1_WR, file = "dgpANN_modelAAN_l1_WR.Rdata")
-save(dgpANN_modelANA_l1_WR, file = "dgpANN_modelANA_l1_WR.Rdata")
-save(dgpANN_modelAAA_l1_WR, file = "dgpANN_modelAAA_l1_WR.Rdata")
-save(dgpANN_modelAAdA_l1_WR, file = "dgpANN_modelAAdA_l1_WR.Rdata")
-save(dgpANN_modelAAdN_l1_WR, file = "dgpANN_modelAAdN_l1_WR.Rdata")
-save(dgpANN_modelMAM_l1_WR, file = "dgpANN_modelMAM_l1_WR.Rdata")
 
 ## DGP: AAN
 # Without weights
-start.timeUR <- Sys.time()
 system.time({dgpAAN_modelANN_l1_UR <- clusterApplyLB(cl, 1:runs, function(x) final.compile(dgp = "AAN", nobs = c(28, 420), freq = 7, model = "ANN", 
                                                                                            h = 7, origin = 5, type.loss = "l1", 
                                                                                            tuning = c(0.1), weighted = FALSE))})
@@ -811,28 +795,9 @@ system.time({dgpAAN_modelAAdN_l1_WR <- clusterApplyLB(cl, 1:runs, function(x) fi
 system.time({dgpAAN_modelMAM_l1_WR <- clusterApplyLB(cl, 1:runs, function(x) final.compile(dgp = "AAN", nobs = c(28, 420), freq = 7, model = "MAM", 
                                                                                            h = 7, origin = 5, type.loss = "l1", 
                                                                                            tuning = c(0.1, 0.33, 0.33, 0.33), weighted = TRUE))})
-end.timeWR <- Sys.time()
-computetime2 <- end.timeWR - start.timeUR
-
-save(dgpAAN_modelANN_l1_UR, file = "dgpAAN_modelANN_l1_UR.Rdata")
-save(dgpAAN_modelAAN_l1_UR, file = "dgpAAN_modelAAN_l1_UR.Rdata")
-save(dgpAAN_modelANA_l1_UR, file = "dgpAAN_modelANA_l1_UR.Rdata")
-save(dgpAAN_modelAAA_l1_UR, file = "dgpAAN_modelAAA_l1_UR.Rdata")
-save(dgpAAN_modelAAdA_l1_UR, file = "dgpAAN_modelAAdA_l1_UR.Rdata")
-save(dgpAAN_modelAAdN_l1_UR, file = "dgpAAN_modelAAdN_l1_UR.Rdata")
-save(dgpAAN_modelMAM_l1_UR, file = "dgpAAN_modelMAM_l1_UR.Rdata")
-
-save(dgpAAN_modelANN_l1_WR, file = "dgpAAN_modelANN_l1_WR.Rdata")
-save(dgpAAN_modelAAN_l1_WR, file = "dgpAAN_modelAAN_l1_WR.Rdata")
-save(dgpAAN_modelANA_l1_WR, file = "dgpAAN_modelANA_l1_WR.Rdata")
-save(dgpAAN_modelAAA_l1_WR, file = "dgpAAN_modelAAA_l1_WR.Rdata")
-save(dgpAAN_modelAAdA_l1_WR, file = "dgpAAN_modelAAdA_l1_WR.Rdata")
-save(dgpAAN_modelAAdN_l1_WR, file = "dgpAAN_modelAAdN_l1_WR.Rdata")
-save(dgpAAN_modelMAM_l1_WR, file = "dgpAAN_modelMAM_l1_WR.Rdata")
 
 ## DGP: ANA
 # Without weights
-start.timeUR <- Sys.time()
 system.time({dgpANA_modelANN_l1_UR <- clusterApplyLB(cl, 1:runs, function(x) final.compile(dgp = "ANA", nobs = c(28, 420), freq = 7, model = "ANN", 
                                                                                            h = 7, origin = 5, type.loss = "l1", 
                                                                                            tuning = c(0.1), weighted = FALSE))})
@@ -877,29 +842,10 @@ system.time({dgpANA_modelAAdN_l1_WR <- clusterApplyLB(cl, 1:runs, function(x) fi
 system.time({dgpANA_modelMAM_l1_WR <- clusterApplyLB(cl, 1:runs, function(x) final.compile(dgp = "ANA", nobs = c(28, 420), freq = 7, model = "MAM", 
                                                                                            h = 7, origin = 5, type.loss = "l1", 
                                                                                            tuning = c(0.1, 0.33, 0.33, 0.33), weighted = TRUE))})
-end.timeWR <- Sys.time()
-computetime3 <- end.timeWR - start.timeUR
-
-save(dgpANA_modelANN_l1_UR, file = "dgpANA_modelANN_l1_UR.Rdata")
-save(dgpANA_modelAAN_l1_UR, file = "dgpANA_modelAAN_l1_UR.Rdata")
-save(dgpANA_modelANA_l1_UR, file = "dgpANA_modelANA_l1_UR.Rdata")
-save(dgpANA_modelAAA_l1_UR, file = "dgpANA_modelAAA_l1_UR.Rdata")
-save(dgpANA_modelAAdA_l1_UR, file = "dgpANA_modelAAdA_l1_UR.Rdata")
-save(dgpANA_modelAAdN_l1_UR, file = "dgpANA_modelAAdN_l1_UR.Rdata")
-save(dgpANA_modelMAM_l1_UR, file = "dgpANA_modelMAM_l1_UR.Rdata")
-
-save(dgpANA_modelANN_l1_WR, file = "dgpANA_modelANN_l1_WR.Rdata")
-save(dgpANA_modelAAN_l1_WR, file = "dgpANA_modelAAN_l1_WR.Rdata")
-save(dgpANA_modelANA_l1_WR, file = "dgpANA_modelANA_l1_WR.Rdata")
-save(dgpANA_modelAAA_l1_WR, file = "dgpANA_modelAAA_l1_WR.Rdata")
-save(dgpANA_modelAAdA_l1_WR, file = "dgpANA_modelAAdA_l1_WR.Rdata")
-save(dgpANA_modelAAdN_l1_WR, file = "dgpANA_modelAAdN_l1_WR.Rdata")
-save(dgpANA_modelMAM_l1_WR, file = "dgpANA_modelMAM_l1_WR.Rdata")
-
 
 ## DGP: AAA
 # Without weights
-start.timeUR <- Sys.time()
+
 system.time({dgpAAA_modelANN_l1_UR <- clusterApplyLB(cl, 1:runs, function(x) final.compile(dgp = "AAA", nobs = c(28, 420), freq = 7, model = "ANN", 
                                                                                            h = 7, origin = 5, type.loss = "l1", 
                                                                                            tuning = c(0.1), weighted = FALSE))})
@@ -944,28 +890,9 @@ system.time({dgpAAA_modelAAdN_l1_WR <- clusterApplyLB(cl, 1:runs, function(x) fi
 system.time({dgpAAA_modelMAM_l1_WR <- clusterApplyLB(cl, 1:runs, function(x) final.compile(dgp = "AAA", nobs = c(28, 420), freq = 7, model = "MAM", 
                                                                                            h = 7, origin = 5, type.loss = "l1", 
                                                                                            tuning = c(0.1, 0.33, 0.33, 0.33), weighted = TRUE))})
-end.timeWR <- Sys.time()
-computetime4 <- end.timeWR - start.timeUR
-
-save(dgpAAA_modelANN_l1_UR, file = "dgpAAA_modelANN_l1_UR.Rdata")
-save(dgpAAA_modelAAN_l1_UR, file = "dgpAAA_modelAAN_l1_UR.Rdata")
-save(dgpAAA_modelANA_l1_UR, file = "dgpAAA_modelANA_l1_UR.Rdata")
-save(dgpAAA_modelAAA_l1_UR, file = "dgpAAA_modelAAA_l1_UR.Rdata")
-save(dgpAAA_modelAAdA_l1_UR, file = "dgpAAA_modelAAdA_l1_UR.Rdata")
-save(dgpAAA_modelAAdN_l1_UR, file = "dgpAAA_modelAAdN_l1_UR.Rdata")
-save(dgpAAA_modelMAM_l1_UR, file = "dgpAAA_modelMAM_l1_UR.Rdata")
-
-save(dgpAAA_modelANN_l1_WR, file = "dgpAAA_modelANN_l1_WR.Rdata")
-save(dgpAAA_modelAAN_l1_WR, file = "dgpAAA_modelAAN_l1_WR.Rdata")
-save(dgpAAA_modelANA_l1_WR, file = "dgpAAA_modelANA_l1_WR.Rdata")
-save(dgpAAA_modelAAA_l1_WR, file = "dgpAAA_modelAAA_l1_WR.Rdata")
-save(dgpAAA_modelAAdA_l1_WR, file = "dgpAAA_modelAAdA_l1_WR.Rdata")
-save(dgpAAA_modelAAdN_l1_WR, file = "dgpAAA_modelAAdN_l1_WR.Rdata")
-save(dgpAAA_modelMAM_l1_WR, file = "dgpAAA_modelMAM_l1_WR.Rdata")
 
 ## DGP: AAdA
 # Without weights
-start.timeUR <- Sys.time()
 system.time({dgpAAdA_modelANN_l1_UR <- clusterApplyLB(cl, 1:runs, function(x) final.compile(dgp = "AAdA", nobs = c(28, 420), freq = 7, model = "ANN", 
                                                                                             h = 7, origin = 5, type.loss = "l1", 
                                                                                             tuning = c(0.1), weighted = FALSE))})
@@ -1010,28 +937,9 @@ system.time({dgpAAdA_modelAAdN_l1_WR <- clusterApplyLB(cl, 1:runs, function(x) f
 system.time({dgpAAdA_modelMAM_l1_WR <- clusterApplyLB(cl, 1:runs, function(x) final.compile(dgp = "AAdA", nobs = c(28, 420), freq = 7, model = "MAM", 
                                                                                             h = 7, origin = 5, type.loss = "l1", 
                                                                                             tuning = c(0.1, 0.33, 0.33, 0.33), weighted = TRUE))})
-end.timeWR <- Sys.time()
-computetime5 <- end.timeWR - start.timeUR
-
-save(dgpAAdA_modelANN_l1_UR, file = "dgpAAdA_modelANN_l1_UR.Rdata")
-save(dgpAAdA_modelAAN_l1_UR, file = "dgpAAdA_modelAAN_l1_UR.Rdata")
-save(dgpAAdA_modelANA_l1_UR, file = "dgpAAdA_modelANA_l1_UR.Rdata")
-save(dgpAAdA_modelAAA_l1_UR, file = "dgpAAdA_modelAAA_l1_UR.Rdata")
-save(dgpAAdA_modelAAdA_l1_UR, file = "dgpAAdA_modelAAdA_l1_UR.Rdata")
-save(dgpAAdA_modelAAdN_l1_UR, file = "dgpAAdA_modelAAdN_l1_UR.Rdata")
-save(dgpAAdA_modelMAM_l1_UR, file = "dgpAAdA_modelMAM_l1_UR.Rdata")
-
-save(dgpAAdA_modelANN_l1_WR, file = "dgpAAdA_modelANN_l1_WR.Rdata")
-save(dgpAAdA_modelAAN_l1_WR, file = "dgpAAdA_modelAAN_l1_WR.Rdata")
-save(dgpAAdA_modelANA_l1_WR, file = "dgpAAdA_modelANA_l1_WR.Rdata")
-save(dgpAAdA_modelAAA_l1_WR, file = "dgpAAdA_modelAAA_l1_WR.Rdata")
-save(dgpAAdA_modelAAdA_l1_WR, file = "dgpAAdA_modelAAdA_l1_WR.Rdata")
-save(dgpAAdA_modelAAdN_l1_WR, file = "dgpAAdA_modelAAdN_l1_WR.Rdata")
-save(dgpAAdA_modelMAM_l1_WR, file = "dgpAAdA_modelMAM_l1_WR.Rdata")
 
 ## DGP: AAdN
 # Without weights
-start.timeUR <- Sys.time()
 system.time({dgpAAdN_modelANN_l1_UR <- clusterApplyLB(cl, 1:runs, function(x) final.compile(dgp = "AAdN", nobs = c(28, 420), freq = 7, model = "ANN", 
                                                                                             h = 7, origin = 5, type.loss = "l1", 
                                                                                             tuning = c(0.1), weighted = FALSE))})
@@ -1076,28 +984,9 @@ system.time({dgpAAdN_modelAAdN_l1_WR <- clusterApplyLB(cl, 1:runs, function(x) f
 system.time({dgpAAdN_modelMAM_l1_WR <- clusterApplyLB(cl, 1:runs, function(x) final.compile(dgp = "AAdN", nobs = c(28, 420), freq = 7, model = "MAM", 
                                                                                             h = 7, origin = 5, type.loss = "l1", 
                                                                                             tuning = c(0.1, 0.33, 0.33, 0.33), weighted = TRUE))})
-end.timeWR <- Sys.time()
-computetime6 <- end.timeWR - start.timeUR
-
-save(dgpAAdN_modelANN_l1_UR, file = "dgpAAdN_modelANN_l1_UR.Rdata")
-save(dgpAAdN_modelAAN_l1_UR, file = "dgpAAdN_modelAAN_l1_UR.Rdata")
-save(dgpAAdN_modelANA_l1_UR, file = "dgpAAdN_modelANA_l1_UR.Rdata")
-save(dgpAAdN_modelAAA_l1_UR, file = "dgpAAdN_modelAAA_l1_UR.Rdata")
-save(dgpAAdN_modelAAdA_l1_UR, file = "dgpAAdN_modelAAdA_l1_UR.Rdata")
-save(dgpAAdN_modelAAdN_l1_UR, file = "dgpAAdN_modelAAdN_l1_UR.Rdata")
-save(dgpAAdN_modelMAM_l1_UR, file = "dgpAAdN_modelMAM_l1_UR.Rdata")
-
-save(dgpAAdN_modelANN_l1_WR, file = "dgpAAdN_modelANN_l1_WR.Rdata")
-save(dgpAAdN_modelAAN_l1_WR, file = "dgpAAdN_modelAAN_l1_WR.Rdata")
-save(dgpAAdN_modelANA_l1_WR, file = "dgpAAdN_modelANA_l1_WR.Rdata")
-save(dgpAAdN_modelAAA_l1_WR, file = "dgpAAdN_modelAAA_l1_WR.Rdata")
-save(dgpAAdN_modelAAdA_l1_WR, file = "dgpAAdN_modelAAdA_l1_WR.Rdata")
-save(dgpAAdN_modelAAdN_l1_WR, file = "dgpAAdN_modelAAdN_l1_WR.Rdata")
-save(dgpAAdN_modelMAM_l1_WR, file = "dgpAAdN_modelMAM_l1_WR.Rdata")
 
 ## DGP: MAM
 # Without weights
-start.timeUR <- Sys.time()
 system.time({dgpMAM_modelANN_l1_UR <- clusterApplyLB(cl, 1:runs, function(x) final.compile(dgp = "MAM", nobs = c(28, 420), freq = 7, model = "ANN", 
                                                                                            h = 7, origin = 5, type.loss = "l1", 
                                                                                            tuning = c(0.1), weighted = FALSE))})
@@ -1142,28 +1031,39 @@ system.time({dgpMAM_modelAAdN_l1_WR <- clusterApplyLB(cl, 1:runs, function(x) fi
 system.time({dgpMAM_modelMAM_l1_WR <- clusterApplyLB(cl, 1:runs, function(x) final.compile(dgp = "MAM", nobs = c(28, 420), freq = 7, model = "MAM", 
                                                                                            h = 7, origin = 5, type.loss = "l1", 
                                                                                            tuning = c(0.1, 0.33, 0.33, 0.33), weighted = TRUE))})
-end.timeWR <- Sys.time()
-computetime7 <- end.timeWR - start.timeUR
 
-save(dgpMAM_modelANN_l1_UR, file = "dgpMAM_modelANN_l1_UR.Rdata")
-save(dgpMAM_modelAAN_l1_UR, file = "dgpMAM_modelAAN_l1_UR.Rdata")
-save(dgpMAM_modelANA_l1_UR, file = "dgpMAM_modelANA_l1_UR.Rdata")
-save(dgpMAM_modelAAA_l1_UR, file = "dgpMAM_modelAAA_l1_UR.Rdata")
-save(dgpMAM_modelAAdA_l1_UR, file = "dgpMAM_modelAAdA_l1_UR.Rdata")
-save(dgpMAM_modelAAdN_l1_UR, file = "dgpMAM_modelAAdN_l1_UR.Rdata")
-save(dgpMAM_modelMAM_l1_UR, file = "dgpMAM_modelMAM_l1_UR.Rdata")
 
-save(dgpMAM_modelANN_l1_WR, file = "dgpMAM_modelANN_l1_WR.Rdata")
-save(dgpMAM_modelAAN_l1_WR, file = "dgpMAM_modelAAN_l1_WR.Rdata")
-save(dgpMAM_modelANA_l1_WR, file = "dgpMAM_modelANA_l1_WR.Rdata")
-save(dgpMAM_modelAAA_l1_WR, file = "dgpMAM_modelAAA_l1_WR.Rdata")
-save(dgpMAM_modelAAdA_l1_WR, file = "dgpMAM_modelAAdA_l1_WR.Rdata")
-save(dgpMAM_modelAAdN_l1_WR, file = "dgpMAM_modelAAdN_l1_WR.Rdata")
-save(dgpMAM_modelMAM_l1_WR, file = "dgpMAM_modelMAM_l1_WR.Rdata")
+save(list = c("dgpANN_modelANN_l1_UR", "dgpANN_modelAAN_l1_UR", "dgpANN_modelANA_l1_UR", "dgpANN_modelAAA_l1_UR", 
+              "dgpANN_modelAAdA_l1_UR", "dgpANN_modelAAdN_l1_UR", "dgpANN_modelMAM_l1_UR",
+              "dgpAAN_modelANN_l1_UR", "dgpAAN_modelAAN_l1_UR", "dgpAAN_modelANA_l1_UR", "dgpAAN_modelAAA_l1_UR",
+              "dgpAAN_modelAAdA_l1_UR", "dgpAAN_modelAAdN_l1_UR", "dgpAAN_modelMAM_l1_UR",
+              "dgpANA_modelANN_l1_UR", "dgpANA_modelAAN_l1_UR", "dgpANA_modelANA_l1_UR", "dgpANA_modelAAA_l1_UR",
+              "dgpANA_modelAAdA_l1_UR", "dgpANA_modelAAdN_l1_UR", "dgpANA_modelMAM_l1_UR",
+              "dgpAAA_modelANN_l1_UR", "dgpAAA_modelAAN_l1_UR", "dgpAAA_modelANA_l1_UR", "dgpAAA_modelAAA_l1_UR",
+              "dgpAAA_modelAAdA_l1_UR", "dgpAAA_modelAAdN_l1_UR", "dgpAAA_modelMAM_l1_UR",
+              "dgpAAdA_modelANN_l1_UR", "dgpAAdA_modelAAN_l1_UR", "dgpAAdA_modelANA_l1_UR", "dgpAAdA_modelAAA_l1_UR",
+              "dgpAAdA_modelAAdA_l1_UR", "dgpAAdA_modelAAdN_l1_UR", "dgpAAdA_modelMAM_l1_UR",
+              "dgpAAdN_modelANN_l1_UR", "dgpAAdN_modelAAN_l1_UR", "dgpAAdN_modelANA_l1_UR", "dgpAAdN_modelAAA_l1_UR",
+              "dgpAAdN_modelAAdA_l1_UR", "dgpAAdN_modelAAdN_l1_UR", "dgpAAdN_modelMAM_l1_UR",
+              "dgpMAM_modelANN_l1_UR", "dgpMAM_modelAAN_l1_UR", "dgpMAM_modelANA_l1_UR", "dgpMAM_modelAAA_l1_UR",
+              "dgpMAM_modelAAdA_l1_UR", "dgpMAM_modelAAdN_l1_UR", "dgpMAM_modelMAM_l1_UR"),
+     file = "L1_UR.Rdata")
 
-save(list(computetime1, computetime2, computetime3, computetime4,
-          computetime5, computetime6, computetime7), 
-     file = "computetime_l1.RData")
+save(list = c("dgpANN_modelANN_l1_WR", "dgpANN_modelAAN_l1_WR", "dgpANN_modelANA_l1_WR", "dgpANN_modelAAA_l1_WR", 
+              "dgpANN_modelAAdA_l1_WR", "dgpANN_modelAAdN_l1_WR", "dgpANN_modelMAM_l1_WR",
+              "dgpAAN_modelANN_l1_WR", "dgpAAN_modelAAN_l1_WR", "dgpAAN_modelANA_l1_WR", "dgpAAN_modelAAA_l1_WR",
+              "dgpAAN_modelAAdA_l1_WR", "dgpAAN_modelAAdN_l1_WR", "dgpAAN_modelMAM_l1_WR",
+              "dgpANA_modelANN_l1_WR", "dgpANA_modelAAN_l1_WR", "dgpANA_modelANA_l1_WR", "dgpANA_modelAAA_l1_WR",
+              "dgpANA_modelAAdA_l1_WR", "dgpANA_modelAAdN_l1_WR", "dgpANA_modelMAM_l1_WR",
+              "dgpAAA_modelANN_l1_WR", "dgpAAA_modelAAN_l1_WR", "dgpAAA_modelANA_l1_WR", "dgpAAA_modelAAA_l1_WR",
+              "dgpAAA_modelAAdA_l1_WR", "dgpAAA_modelAAdN_l1_WR", "dgpAAA_modelMAM_l1_WR",
+              "dgpAAdA_modelANN_l1_WR", "dgpAAdA_modelAAN_l1_WR", "dgpAAdA_modelANA_l1_WR", "dgpAAdA_modelAAA_l1_WR",
+              "dgpAAdA_modelAAdA_l1_WR", "dgpAAdA_modelAAdN_l1_WR", "dgpAAdA_modelMAM_l1_WR",
+              "dgpAAdN_modelANN_l1_WR", "dgpAAdN_modelAAN_l1_WR", "dgpAAdN_modelANA_l1_WR", "dgpAAdN_modelAAA_l1_WR",
+              "dgpAAdN_modelAAdA_l1_WR", "dgpAAdN_modelAAdN_l1_WR", "dgpAAdN_modelMAM_l1_WR",
+              "dgpMAM_modelANN_l1_WR", "dgpMAM_modelAAN_l1_WR", "dgpMAM_modelANA_l1_WR", "dgpMAM_modelAAA_l1_WR",
+              "dgpMAM_modelAAdA_l1_WR", "dgpMAM_modelAAdN_l1_WR", "dgpMAM_modelMAM_l1_WR"),
+     file = "L1_WR.Rdata")
 
 stopCluster(cl)
 

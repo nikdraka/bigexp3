@@ -12,6 +12,8 @@ library(clusterGeneration)
 library(parallel)
 library(RColorBrewer)
 library(devtools)
+library(snow)
+library(rlecuyer)
 
 ## Function to run
 # generate time series
@@ -21,50 +23,50 @@ genseries <- function(dgp = c("ANN", "AAN", "AAdN","ANA", "AAA"), n = 100, freq 
   n <- n[1]
   freq <- freq
   
-  burnin <- 200
+  burnin <- 0
   
   # 1. Generating the time series, season initial values are generated randomly
   if (dgp == "ANN") {
     input.persist <- 0.4
-    input.initial <- c(100)
+    input.initial <- c(200)
     y <- sim.es(model = dgp, obs = burnin+n, nsim = 1, frequency = freq,
                 bounds = "usual", persistence = input.persist,
                 initial = input.initial)$data[(burnin+1):(burnin+n)]
   } else if (dgp == "AAN") {
     input.persist <- c(0.4, 0.3)
-    input.initial <- c(100, 0.5)
+    input.initial <- c(200, 0.5)
     y <- sim.es(model = dgp, obs = burnin+n, nsim = 1, frequency = freq,
                 bounds = "usual", persistence = input.persist,
                 initial = input.initial)$data[(burnin+1):(burnin+n)]
   } else if (dgp == "ANA") {
-    input.persist <- c(0.4, 0.2)
-    input.initial <- c(100)
+    input.persist <- c(0.4, 0.1)
+    input.initial <- c(200)
     y <- sim.es(model = dgp, obs = burnin+n, nsim = 1, frequency = freq,
                 bounds = "usual", persistence = input.persist,
                 initial = input.initial)$data[(burnin+1):(burnin+n)]
   } else if (dgp == "AAA") {
-    input.persist <- c(0.4, 0.3, 0.2)
-    input.initial <- c(100, 0.5)
+    input.persist <- c(0.4, 0.3, 0.1)
+    input.initial <- c(200, 0.5)
     y <- sim.es(model = dgp, obs = burnin+n, nsim = 1, frequency = freq,
                 bounds = "usual", persistence = input.persist,
                 initial = input.initial)$data[(burnin+1):(burnin+n)]
   } else if (is.null(dgp)) {
     input.persist <- 0.4
-    input.initial <- c(100)
+    input.initial <- c(200)
     y <- sim.es(model = dgp, obs = burnin+n, nsim = 1, frequency = freq,
                 bounds = "usual", persistence = input.persist,
                 initial = input.initial)$data[(burnin+1):(burnin+n)]
   } else if (dgp == "AAdN") {
     input.persist <- c(0.4, 0.3)
-    input.initial <- c(100, 0.5)
+    input.initial <- c(200, 0.5)
     y <- sim.es(model = dgp, obs = burnin+n, nsim = 1, frequency = freq,
-                bounds = "usual", persistence = input.persist, phi = 0.9,
+                bounds = "usual", persistence = input.persist, phi = 0.94,
                 initial = input.initial)$data[(burnin+1):(burnin+n)]
   } else if (dgp == "AAdA") {
-    input.persist <- c(0.4, 0.3, 0.2)
+    input.persist <- c(0.4, 0.3, 0.1)
     input.initial <- c(100, 0.5)
     y <- sim.es(model = dgp, obs = burnin+n, nsim = 1, frequency = freq,
-                bounds = "usual", persistence = input.persist, phi = 0.9,
+                bounds = "usual", persistence = input.persist, phi = 0.94,
                 initial = input.initial)$data[(burnin+1):(burnin+n)]
   } else if (dgp == "MAM") {
     input.persist <- c(0.3, 0.2, 0.1)
@@ -573,9 +575,13 @@ final.compile <- function(dgp = dgp, nobs = c(28, 420), freq = freq, model = mod
   weighted <- weighted
   
   ## Small sample size
-  y1 <-  ts(genseries(dgp = dgp, n = nobs1, freq = freq), frequency = freq)
-  while (min(y1) < 0) {
-    y1 <- ts(genseries(dgp = dgp, n = nobs1, freq = freq), frequency = freq)
+  if (dgp == "MAM") {
+    y1 <-  ts(genseries(dgp = dgp, n = nobs1, freq = freq), frequency = freq)
+    while (sum((y1 > 0)) != length(y1)) {
+      y1 <- ts(genseries(dgp = dgp, n = nobs1, freq = freq), frequency = freq)
+    }
+  } else {
+    y1 <-  ts(genseries(dgp = dgp, n = nobs1, freq = freq), frequency = freq)
   }
   
   model1 <- compile.ets(data = y1, model = mdl, origin = origin, h = h,
@@ -583,10 +589,15 @@ final.compile <- function(dgp = dgp, nobs = c(28, 420), freq = freq, model = mod
                         weighted = weighted, year.insample = 2)
   
   ## Large sample size
-  y2 <-  ts(genseries(dgp = dgp, n = nobs2, freq = freq), frequency = freq)
-  while (min(y2) < 0) {
-    y2 <- ts(genseries(dgp = dgp, n = nobs2, freq = freq), frequency = freq)
+  if (dgp == "MAM") {
+    y2 <-  ts(genseries(dgp = dgp, n = nobs2, freq = freq), frequency = freq)
+    while (sum((y2 > 0)) != length(y2)) {
+      y2 <- ts(genseries(dgp = dgp, n = nobs2, freq = freq), frequency = freq)
+    }
+  } else {
+    y2 <-  ts(genseries(dgp = dgp, n = nobs2, freq = freq), frequency = freq)
   }
+  
   
   model2 <- compile.ets(data = y2, model = mdl, origin = origin, h = h,
                         type.loss = type.loss, tuning = tuning, 
@@ -610,9 +621,9 @@ accuracy.etsreg <- function(error = error, horizon = horizon, scaled = FALSE) {
   
   for (i in 2:h) {
     
-    acc[1,1] <- sqrt(mean((error[,1])^2))
+    acc[1,1] <- mean(sqrt((error[,1])^2))
     acc[2,1] <- mean(abs(error[,1]))
-    acc[3,1] <- median(abs(error[,1]))
+    acc[3,1] <- mean(abs(error[,1]))
     acc[4,1] <- mean(error[,1])
     
     acc[1, i] <- mean(apply(error[,1:i], 1, function(x) sqrt(mean(x^2))))
@@ -651,8 +662,7 @@ predinterval.etsreg <- function(test = NULL, forecast = NULL, origin = origin,
                           fcst[[i]]$lower[1:j,col.level], 
                           fcst[[i]]$upper[1:j,col.level], level)
       
-      mat.pinball[i,j] <- pinball(test[i,1:j], fcst[[i]]$lower[1:j,col.level], (1-level)/2, loss = 1) +
-        pinball(test[i,1:j], fcst[[i]]$upper[1:j,col.level], level+(1-level)/2, loss = 1)
+      mat.pinball[i,j] <- pinball(test[i,1:j], fcst[[i]]$upper[1:j,col.level], level+(1-level)/2, loss = 1)
       
       mat.coverage[i,j] <- mean(test[i,j] > fcst[[i]]$lower[1:j,col.level] & test[i,j] < fcst[[i]]$upper[1:j,col.level])
       
@@ -676,7 +686,7 @@ predinterval.etsreg <- function(test = NULL, forecast = NULL, origin = origin,
 set.seed(020193)
 
 crs <- detectCores()
-cl <- makeForkCluster(getOption("cl.cores", crs-1))
+cl <- makeCluster(getOption("cl.cores", crs-1))
 writeLines(paste("Running with", crs-1, 'cores'))
 # Load packages to cluster
 invisible(clusterCall(cl, function(pkgs) {
@@ -696,6 +706,8 @@ invisible(clusterExport(cl, "final.compile"))
 invisible(clusterExport(cl, "accuracy.etsreg"))
 invisible(clusterExport(cl, "predinterval.etsreg"))
 
+clusterSetupRNG(cl, seed = 020193)
+
 runs <- 500
 
 ## DGP: ANN
@@ -704,6 +716,7 @@ start.timeUR <- Sys.time()
 system.time({dgpANN_modelANN_l2_UR <- clusterApplyLB(cl, 1:runs, function(x) final.compile(dgp = "ANN", nobs = c(28, 420), freq = 7, model = "ANN", 
                                                                               h = 7, origin = 5, type.loss = "l2", 
                                                                               tuning = c(0.1), weighted = FALSE))})
+Sys.time() - start.timeUR
 system.time({dgpANN_modelAAN_l2_UR <- clusterApplyLB(cl, 1:runs, function(x) final.compile(dgp = "ANN", nobs = c(28, 420), freq = 7, model = "AAN", 
                                                                               h = 7, origin = 5, type.loss = "l2", 
                                                                               tuning = c(0.1), weighted = FALSE))})
@@ -723,31 +736,6 @@ system.time({dgpANN_modelMAM_l2_UR <- clusterApplyLB(cl, 1:runs, function(x) fin
                                                                               h = 7, origin = 5, type.loss = "l2", 
                                                                               tuning = c(0.1), weighted = FALSE))})
 
-# With weights
-system.time({dgpANN_modelANN_l2_WR <- clusterApplyLB(cl, 1:runs, function(x) final.compile(dgp = "ANN", nobs = c(28, 420), freq = 7, model = "ANN", 
-                                                                              h = 7, origin = 5, type.loss = "l2", 
-                                                                              tuning = c(0.1, 0.1), weighted = TRUE))})
-system.time({dgpANN_modelAAN_l2_WR <- clusterApplyLB(cl, 1:runs, function(x) final.compile(dgp = "ANN", nobs = c(28, 420), freq = 7, model = "AAN", 
-                                                                              h = 7, origin = 5, type.loss = "l2", 
-                                                                              tuning = c(0.1, 0.5, 0.5), weighted = TRUE))})
-system.time({dgpANN_modelANA_l2_WR <- clusterApplyLB(cl, 1:runs, function(x) final.compile(dgp = "ANN", nobs = c(28, 420), freq = 7, model = "ANA", 
-                                                                              h = 7, origin = 5, type.loss = "l2", 
-                                                                              tuning = c(0.1, 0.5, 0.5), weighted = TRUE))})
-system.time({dgpANN_modelAAA_l2_WR <- clusterApplyLB(cl, 1:runs, function(x) final.compile(dgp = "ANN", nobs = c(28, 420), freq = 7, model = "AAA", 
-                                                                              h = 7, origin = 5, type.loss = "l2", 
-                                                                              tuning = c(0.1, 0.33, 0.33, 0.33), weighted = TRUE))})
-system.time({dgpANN_modelAAdA_l2_WR <- clusterApplyLB(cl, 1:runs, function(x) final.compile(dgp = "ANN", nobs = c(28, 420), freq = 7, model = "AAdA", 
-                                                                              h = 7, origin = 5, type.loss = "l2", 
-                                                                              tuning = c(0.1, 0.25, 0.25, 0.25, 0.25), weighted = TRUE))})
-system.time({dgpANN_modelAAdN_l2_WR <- clusterApplyLB(cl, 1:runs, function(x) final.compile(dgp = "ANN", nobs = c(28, 420), freq = 7, model = "AAdN", 
-                                                                              h = 7, origin = 5, type.loss = "l2", 
-                                                                              tuning = c(0.1, 0.33, 0.33, 0.33), weighted = TRUE))})
-system.time({dgpANN_modelMAM_l2_WR <- clusterApplyLB(cl, 1:runs, function(x) final.compile(dgp = "ANN", nobs = c(28, 420), freq = 7, model = "MAM", 
-                                                                              h = 7, origin = 5, type.loss = "l2", 
-                                                                              tuning = c(0.1, 0.33, 0.33, 0.33), weighted = TRUE))})
-end.timeWR <- Sys.time()
-computetime1 <- end.timeWR - start.timeUR
-
 save(dgpANN_modelANN_l2_UR, file = "dgpANN_modelANN_l2_UR.Rdata")
 save(dgpANN_modelAAN_l2_UR, file = "dgpANN_modelAAN_l2_UR.Rdata")
 save(dgpANN_modelANA_l2_UR, file = "dgpANN_modelANA_l2_UR.Rdata")
@@ -756,17 +744,11 @@ save(dgpANN_modelAAdA_l2_UR, file = "dgpANN_modelAAdA_l2_UR.Rdata")
 save(dgpANN_modelAAdN_l2_UR, file = "dgpANN_modelAAdN_l2_UR.Rdata")
 save(dgpANN_modelMAM_l2_UR, file = "dgpANN_modelMAM_l2_UR.Rdata")
 
-save(dgpANN_modelANN_l2_WR, file = "dgpANN_modelANN_l2_WR.Rdata")
-save(dgpANN_modelAAN_l2_WR, file = "dgpANN_modelAAN_l2_WR.Rdata")
-save(dgpANN_modelANA_l2_WR, file = "dgpANN_modelANA_l2_WR.Rdata")
-save(dgpANN_modelAAA_l2_WR, file = "dgpANN_modelAAA_l2_WR.Rdata")
-save(dgpANN_modelAAdA_l2_WR, file = "dgpANN_modelAAdA_l2_WR.Rdata")
-save(dgpANN_modelAAdN_l2_WR, file = "dgpANN_modelAAdN_l2_WR.Rdata")
-save(dgpANN_modelMAM_l2_WR, file = "dgpANN_modelMAM_l2_WR.Rdata")
 
 ## DGP: AAN
 # Without weights
 start.timeUR <- Sys.time()
+set.seed(020193)
 system.time({dgpAAN_modelANN_l2_UR <- clusterApplyLB(cl, 1:runs, function(x) final.compile(dgp = "AAN", nobs = c(28, 420), freq = 7, model = "ANN", 
                                                                                            h = 7, origin = 5, type.loss = "l2", 
                                                                                            tuning = c(0.1), weighted = FALSE))})
@@ -788,6 +770,15 @@ system.time({dgpAAN_modelAAdN_l2_UR <- clusterApplyLB(cl, 1:runs, function(x) fi
 system.time({dgpAAN_modelMAM_l2_UR <- clusterApplyLB(cl, 1:runs, function(x) final.compile(dgp = "AAN", nobs = c(28, 420), freq = 7, model = "MAM", 
                                                                                            h = 7, origin = 5, type.loss = "l2", 
                                                                                            tuning = c(0.1), weighted = FALSE))})
+end.timeWR <- Sys.time()
+computetime2 <- end.timeWR - start.timeUR <- end.timeWR - start.timeUR
+save(dgpAAN_modelANN_l2_UR, file = "dgpAAN_modelANN_l2_UR.Rdata")
+save(dgpAAN_modelAAN_l2_UR, file = "dgpAAN_modelAAN_l2_UR.Rdata")
+save(dgpAAN_modelANA_l2_UR, file = "dgpAAN_modelANA_l2_UR.Rdata")
+save(dgpAAN_modelAAA_l2_UR, file = "dgpAAN_modelAAA_l2_UR.Rdata")
+save(dgpAAN_modelAAdA_l2_UR, file = "dgpAAN_modelAAdA_l2_UR.Rdata")
+save(dgpAAN_modelAAdN_l2_UR, file = "dgpAAN_modelAAdN_l2_UR.Rdata")
+save(dgpAAN_modelMAM_l2_UR, file = "dgpAAN_modelMAM_l2_UR.Rdata")
 
 # With weights
 system.time({dgpAAN_modelANN_l2_WR <- clusterApplyLB(cl, 1:runs, function(x) final.compile(dgp = "AAN", nobs = c(28, 420), freq = 7, model = "ANN", 
@@ -833,6 +824,7 @@ save(dgpAAN_modelMAM_l2_WR, file = "dgpAAN_modelMAM_l2_WR.Rdata")
 ## DGP: ANA
 # Without weights
 start.timeUR <- Sys.time()
+set.seed(020193)
 system.time({dgpANA_modelANN_l2_UR <- clusterApplyLB(cl, 1:runs, function(x) final.compile(dgp = "ANA", nobs = c(28, 420), freq = 7, model = "ANN", 
                                                                                            h = 7, origin = 5, type.loss = "l2", 
                                                                                            tuning = c(0.1), weighted = FALSE))})
@@ -854,6 +846,17 @@ system.time({dgpANA_modelAAdN_l2_UR <- clusterApplyLB(cl, 1:runs, function(x) fi
 system.time({dgpANA_modelMAM_l2_UR <- clusterApplyLB(cl, 1:runs, function(x) final.compile(dgp = "ANA", nobs = c(28, 420), freq = 7, model = "MAM", 
                                                                                            h = 7, origin = 5, type.loss = "l2", 
                                                                                            tuning = c(0.1), weighted = FALSE))})
+
+end.timeWR <- Sys.time()
+computetime3 <- end.timeWR - start.timeUR
+
+save(dgpANA_modelANN_l2_UR, file = "dgpANA_modelANN_l2_UR.Rdata")
+save(dgpANA_modelAAN_l2_UR, file = "dgpANA_modelAAN_l2_UR.Rdata")
+save(dgpANA_modelANA_l2_UR, file = "dgpANA_modelANA_l2_UR.Rdata")
+save(dgpANA_modelAAA_l2_UR, file = "dgpANA_modelAAA_l2_UR.Rdata")
+save(dgpANA_modelAAdA_l2_UR, file = "dgpANA_modelAAdA_l2_UR.Rdata")
+save(dgpANA_modelAAdN_l2_UR, file = "dgpANA_modelAAdN_l2_UR.Rdata")
+save(dgpANA_modelMAM_l2_UR, file = "dgpANA_modelMAM_l2_UR.Rdata")
 
 # With weights
 system.time({dgpANA_modelANN_l2_WR <- clusterApplyLB(cl, 1:runs, function(x) final.compile(dgp = "ANA", nobs = c(28, 420), freq = 7, model = "ANN", 
@@ -900,6 +903,7 @@ save(dgpANA_modelMAM_l2_WR, file = "dgpANA_modelMAM_l2_WR.Rdata")
 ## DGP: AAA
 # Without weights
 start.timeUR <- Sys.time()
+set.seed(020193)
 system.time({dgpAAA_modelANN_l2_UR <- clusterApplyLB(cl, 1:runs, function(x) final.compile(dgp = "AAA", nobs = c(28, 420), freq = 7, model = "ANN", 
                                                                                            h = 7, origin = 5, type.loss = "l2", 
                                                                                            tuning = c(0.1), weighted = FALSE))})
@@ -921,6 +925,17 @@ system.time({dgpAAA_modelAAdN_l2_UR <- clusterApplyLB(cl, 1:runs, function(x) fi
 system.time({dgpAAA_modelMAM_l2_UR <- clusterApplyLB(cl, 1:runs, function(x) final.compile(dgp = "AAA", nobs = c(28, 420), freq = 7, model = "MAM", 
                                                                                            h = 7, origin = 5, type.loss = "l2", 
                                                                                            tuning = c(0.1), weighted = FALSE))})
+
+end.timeWR <- Sys.time()
+computetime4 <- end.timeWR - start.timeUR
+
+save(dgpAAA_modelANN_l2_UR, file = "dgpAAA_modelANN_l2_UR.Rdata")
+save(dgpAAA_modelAAN_l2_UR, file = "dgpAAA_modelAAN_l2_UR.Rdata")
+save(dgpAAA_modelANA_l2_UR, file = "dgpAAA_modelANA_l2_UR.Rdata")
+save(dgpAAA_modelAAA_l2_UR, file = "dgpAAA_modelAAA_l2_UR.Rdata")
+save(dgpAAA_modelAAdA_l2_UR, file = "dgpAAA_modelAAdA_l2_UR.Rdata")
+save(dgpAAA_modelAAdN_l2_UR, file = "dgpAAA_modelAAdN_l2_UR.Rdata")
+save(dgpAAA_modelMAM_l2_UR, file = "dgpAAA_modelMAM_l2_UR.Rdata")
 
 # With weights
 system.time({dgpAAA_modelANN_l2_WR <- clusterApplyLB(cl, 1:runs, function(x) final.compile(dgp = "AAA", nobs = c(28, 420), freq = 7, model = "ANN", 
@@ -966,6 +981,7 @@ save(dgpAAA_modelMAM_l2_WR, file = "dgpAAA_modelMAM_l2_WR.Rdata")
 ## DGP: AAdA
 # Without weights
 start.timeUR <- Sys.time()
+set.seed(020193)
 system.time({dgpAAdA_modelANN_l2_UR <- clusterApplyLB(cl, 1:runs, function(x) final.compile(dgp = "AAdA", nobs = c(28, 420), freq = 7, model = "ANN", 
                                                                                             h = 7, origin = 5, type.loss = "l2", 
                                                                                             tuning = c(0.1), weighted = FALSE))})
@@ -987,6 +1003,17 @@ system.time({dgpAAdA_modelAAdN_l2_UR <- clusterApplyLB(cl, 1:runs, function(x) f
 system.time({dgpAAdA_modelMAM_l2_UR <- clusterApplyLB(cl, 1:runs, function(x) final.compile(dgp = "AAdA", nobs = c(28, 420), freq = 7, model = "MAM", 
                                                                                             h = 7, origin = 5, type.loss = "l2", 
                                                                                             tuning = c(0.1), weighted = FALSE))})
+
+end.timeWR <- Sys.time()
+computetime5 <- end.timeWR - start.timeUR
+
+save(dgpAAdA_modelANN_l2_UR, file = "dgpAAdA_modelANN_l2_UR.Rdata")
+save(dgpAAdA_modelAAN_l2_UR, file = "dgpAAdA_modelAAN_l2_UR.Rdata")
+save(dgpAAdA_modelANA_l2_UR, file = "dgpAAdA_modelANA_l2_UR.Rdata")
+save(dgpAAdA_modelAAA_l2_UR, file = "dgpAAdA_modelAAA_l2_UR.Rdata")
+save(dgpAAdA_modelAAdA_l2_UR, file = "dgpAAdA_modelAAdA_l2_UR.Rdata")
+save(dgpAAdA_modelAAdN_l2_UR, file = "dgpAAdA_modelAAdN_l2_UR.Rdata")
+save(dgpAAdA_modelMAM_l2_UR, file = "dgpAAdA_modelMAM_l2_UR.Rdata")
 
 # With weights
 system.time({dgpAAdA_modelANN_l2_WR <- clusterApplyLB(cl, 1:runs, function(x) final.compile(dgp = "AAdA", nobs = c(28, 420), freq = 7, model = "ANN", 
@@ -1032,6 +1059,7 @@ save(dgpAAdA_modelMAM_l2_WR, file = "dgpAAdA_modelMAM_l2_WR.Rdata")
 ## DGP: AAdN
 # Without weights
 start.timeUR <- Sys.time()
+set.seed(020193)
 system.time({dgpAAdN_modelANN_l2_UR <- clusterApplyLB(cl, 1:runs, function(x) final.compile(dgp = "AAdN", nobs = c(28, 420), freq = 7, model = "ANN", 
                                                                                             h = 7, origin = 5, type.loss = "l2", 
                                                                                             tuning = c(0.1), weighted = FALSE))})
@@ -1053,6 +1081,17 @@ system.time({dgpAAdN_modelAAdN_l2_UR <- clusterApplyLB(cl, 1:runs, function(x) f
 system.time({dgpAAdN_modelMAM_l2_UR <- clusterApplyLB(cl, 1:runs, function(x) final.compile(dgp = "AAdN", nobs = c(28, 420), freq = 7, model = "MAM", 
                                                                                             h = 7, origin = 5, type.loss = "l2", 
                                                                                             tuning = c(0.1), weighted = FALSE))})
+
+end.timeWR <- Sys.time()
+computetime6 <- end.timeWR - start.timeUR
+
+save(dgpAAdN_modelANN_l2_UR, file = "dgpAAdN_modelANN_l2_UR.Rdata")
+save(dgpAAdN_modelAAN_l2_UR, file = "dgpAAdN_modelAAN_l2_UR.Rdata")
+save(dgpAAdN_modelANA_l2_UR, file = "dgpAAdN_modelANA_l2_UR.Rdata")
+save(dgpAAdN_modelAAA_l2_UR, file = "dgpAAdN_modelAAA_l2_UR.Rdata")
+save(dgpAAdN_modelAAdA_l2_UR, file = "dgpAAdN_modelAAdA_l2_UR.Rdata")
+save(dgpAAdN_modelAAdN_l2_UR, file = "dgpAAdN_modelAAdN_l2_UR.Rdata")
+save(dgpAAdN_modelMAM_l2_UR, file = "dgpAAdN_modelMAM_l2_UR.Rdata")
 
 # With weights
 system.time({dgpAAdN_modelANN_l2_WR <- clusterApplyLB(cl, 1:runs, function(x) final.compile(dgp = "AAdN", nobs = c(28, 420), freq = 7, model = "ANN", 
@@ -1097,7 +1136,9 @@ save(dgpAAdN_modelMAM_l2_WR, file = "dgpAAdN_modelMAM_l2_WR.Rdata")
 
 ## DGP: MAM
 # Without weights
+Sys.time()
 start.timeUR <- Sys.time()
+set.seed(020193)
 system.time({dgpMAM_modelANN_l2_UR <- clusterApplyLB(cl, 1:runs, function(x) final.compile(dgp = "MAM", nobs = c(28, 420), freq = 7, model = "ANN", 
                                                                                            h = 7, origin = 5, type.loss = "l2", 
                                                                                            tuning = c(0.1), weighted = FALSE))})
@@ -1119,6 +1160,17 @@ system.time({dgpMAM_modelAAdN_l2_UR <- clusterApplyLB(cl, 1:runs, function(x) fi
 system.time({dgpMAM_modelMAM_l2_UR <- clusterApplyLB(cl, 1:runs, function(x) final.compile(dgp = "MAM", nobs = c(28, 420), freq = 7, model = "MAM", 
                                                                                            h = 7, origin = 5, type.loss = "l2", 
                                                                                            tuning = c(0.1), weighted = FALSE))})
+Sys.time()
+end.timeWR <- Sys.time()
+computetime7 <- end.timeWR - start.timeUR
+
+save(dgpMAM_modelANN_l2_UR, file = "dgpMAM_modelANN_l2_UR.Rdata")
+save(dgpMAM_modelAAN_l2_UR, file = "dgpMAM_modelAAN_l2_UR.Rdata")
+save(dgpMAM_modelANA_l2_UR, file = "dgpMAM_modelANA_l2_UR.Rdata")
+save(dgpMAM_modelAAA_l2_UR, file = "dgpMAM_modelAAA_l2_UR.Rdata")
+save(dgpMAM_modelAAdA_l2_UR, file = "dgpMAM_modelAAdA_l2_UR.Rdata")
+save(dgpMAM_modelAAdN_l2_UR, file = "dgpMAM_modelAAdN_l2_UR.Rdata")
+save(dgpMAM_modelMAM_l2_UR, file = "dgpMAM_modelMAM_l2_UR.Rdata")
 
 # With weights
 system.time({dgpMAM_modelANN_l2_WR <- clusterApplyLB(cl, 1:runs, function(x) final.compile(dgp = "MAM", nobs = c(28, 420), freq = 7, model = "ANN", 
